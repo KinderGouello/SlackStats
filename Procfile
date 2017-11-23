@@ -1,1 +1,1 @@
-web: node app/index.js
+web: cd app && node index.js
