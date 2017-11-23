@@ -10,11 +10,15 @@ const scope = 'files:read,files:write:user';
 const state = 'ghjgj657JHK97HI';
 const redirectUri = 'http://localhost:3000/getToken';
 
+const web = new WebClient();
+
 app.get('/getToken', function (req, res) {
-    if (res.params && res.params.code) {
-        console.log('First step done');
+    if (req.query.code && req.query.state === state) {
+        web.oauth.access(clientId, clientSecret, req.query.code, redirectUri, (err, res) => {
+            console.log(res.access_token);
+        });
     } else {
-        res.redirect(`https://slack.com/oauth/authorize?client_id=${clientId}&scope=${scope}`);
+        res.redirect(`https://slack.com/oauth/authorize?client_id=${clientId}&scope=${scope}&redirect_uri=${redirectUri}&state=${state}`);
     }
 });
 
