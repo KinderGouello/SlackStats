@@ -1,6 +1,7 @@
 require('dotenv').config();
 const WebClient = require('@slack/client').WebClient;
 const moment = require('moment');
+const port = process.env.PORT || 3000;
 const token = process.env.SLACK_APP_TOKEN || '';
 const clientId = process.env.SLACK_CLIENT_ID || '';
 const clientSecret = process.env.SLACK_CLIENT_SECRET || '';
@@ -20,6 +21,7 @@ app.get('/getToken', function (req, res) {
         const api = new WebClient();
 
         api.oauth.access(clientId, clientSecret, req.query.code, redirectUri, (err, res) => {
+            console.log(res.a);
         });
     } else {
         res.redirect(`https://slack.com/oauth/authorize?client_id=${clientId}&scope=${scope}&redirect_uri=${redirectUri}&state=${state}`);
@@ -48,4 +50,4 @@ app.get('/delete-files', function (req, res) {
     // });
 });
 
-app.listen(3000);
+app.listen(port);
