@@ -12,10 +12,12 @@
   "license": "ISC",
   "dependencies": {
     "@slack/client": "^3.14.2",
+    "bluebird": "^3.5.1",
     "body-parser": "^1.18.2",
     "dotenv": "^4.0.0",
     "express": "^4.16.2",
     "moment": "^2.19.2",
-    "redis": "^2.8.0"
+    "redis": "^2.8.0",
+    "slack": "^9.0.9"
   }
 }

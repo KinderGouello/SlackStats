@@ -8,6 +8,8 @@ const token = process.env.SLACK_APP_TOKEN || '';
 const clientId = process.env.SLACK_CLIENT_ID || '';
 const clientSecret = process.env.SLACK_CLIENT_SECRET || '';
 const redis = require('redis');
+const Promise = require('bluebird');
+
 const redisClient = redis.createClient({
   'port': process.env.REDIS_PORT || '',
   'host': process.env.REDIS_HOST || '',
@@ -20,7 +22,7 @@ const app = express();
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 
-const scope = 'files:read,files:write:user,users.profile:read';
+const scope = 'files:read,files:write:user,users:read';
 const state = 'ghjgj657JHK97HI';
 const redirectUri = 'https://slackstatslv.herokuapp.com/getToken';
 
@@ -59,56 +61,78 @@ app.get('/activate', (req, res) => {
 });
 
 app.post('/delete-files', (req, res) => {
-  console.log('user_id', req.body.user_id);
-  redisClient.get(req.body.user_id, (err, reply) => {
+  const userId = req.body.user_id;
+  console.log('user_id', userId);
+  redisClient.get(userId, (err, reply) => {
     if (err) throw err;
 
     console.log('reply', reply);
 
     if (!reply) {
       res.send('Tu n’as pas activé le cleaner, click là : https://slackstatslv.herokuapp.com/activate');
-  } else {
+    } else {
       console.log('Listing des fichiers');
       const web = new WebClient(JSON.parse(reply).token);
 
-      web.files.list({
-        // ts_to: moment().subtract(1, 'months').format('X'),
-        // ts_to: moment().subtract(20, 'seconds').format('X'),
-      }, (err, filesResponse) => {
-        if (!filesResponse.files.length) {
-          res.send('Aucun fichier à supprimer');
+      web.users.info(userId, (err, response) => {
+        if (err) {
+          console.log('Error getting user info', err);
+          res.send(err);
         }
+        const userIsAdmin = response.user.is_admin;
+        const listOptions = userIsAdmin 
+        ? {/* ts_to: moment().subtract(1, 'months').format('X') */}
+        : {user: userId, /* ts_to: moment().subtract(1, 'months').format('X') */};
+        console.log('List options:', listOptions);
 
-        const promises = filesResponse.files.map(file => 
-          new Promise(resolve => {
-            web.users.profile.get({ user: file.user }, (err, userProfile) => {
-              if (err) throw err;
+        web.files.list(listOptions, (err, filesResponse) => {
+          if (!filesResponse.files.length) {
+            res.send('Aucun fichier à supprimer');
+          } else {
+            const promises = filesResponse.files.map(file => 
+              new Promise((resolve, reject) => {
+                web.users.profile.get({ user: file.user }, (err, userProfile) => {
+                  if (err) reject(err);
+                  
+                  web.files.delete(file.id, (err, fileResponse) => {
+                    if (err) reject(err);
 
-              web.files.delete(file.id, (err, fileResponse) => {
-                console.log(err);
-                console.log(fileResponse);
+                    if (filesResponse.ok) {
+                      resolve(`Fichier "${file.title}", déposé par ${userProfile.profile.real_name}, a été supprimé.`);
+                    } else {
+                      resolve(`Le fichier "${file.title}", déposé par ${userProfile.profile.real_name}, n’a pas pu être supprimé.`);
+                    }
+                  });
+                });
+              })
+            );
 
-                if (err) throw reject(err);
-
-                if (filesResponse.ok) {
-                  resolve(`Fichier "${file.title}", déposé par ${userProfile.profile.real_name}, a été supprimé.`);
-                } else {
-                  resolve(`Le fichier "${file.title}", déposé par ${userProfile.profile.real_name}, n’a pas pu être supprimé.`);
-                }
-              });
+            Promise.all(promises)
+            .then(responses => {
+              res.send(responses.reduce((accumulator, line) =>
+                accumulator + `${line}\n`
+              , ''));
+            })
+            .catch(err => {
+              res.send('Oops. Something went wrong');
             });
-          })
-        );
-
-        Promise.all(promises)
-        .then(responses => {
-          res.send(responses.reduce((accumulator, line) =>
-            accumulator + `${line}\n`
-          , ''));
+          }
         });
       });
     }
   });
 });
+
+app.get('/listKeys', (req, res) => {
+  redisClient.keys('*', (err, reply) => {
+    if (err) {
+      res.send('Error getting keys:', err);
+    }
+    if (!keys) {
+      res.send('No keys');
+    }
+    res.send('Keys:', reply);
+  });
+}); 
 
 app.listen(port);
