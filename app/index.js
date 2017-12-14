@@ -114,8 +114,6 @@ app.post('/delete-files', (req, res) => {
   });
 });
 
-app.listen(port);
-
 const rtm = new RtmClient(process.env.SLACK_BOT_TOKEN || '');
 rtm.start();
 
@@ -134,31 +132,58 @@ rtm.start();
 
 const api = new WebClient(process.env.SLACK_APP_TOKEN);
 
-api.search.messages('Coucou c', 1, (err, messages) => {
-  console.log(messages);
-});
+const calculScore = (replyCount, reactionCount, timestamp = 0) => {
+    const REPLY_MULTIPLIER = 0.5;
+    const REACTION_MULTIPLIER = 1;
 
+    return replyCount * REPLY_MULTIPLIER + reactionCount * REACTION_MULTIPLIER;
+}
 
-rtm.on(`${RTM_EVENTS.MESSAGE}::${RTM_MESSAGE_SUBTYPES.MESSAGE_CHANGED}`, (message) => {
-  console.log('changed : ', message);
-});
+const getMessage = (channel, timestamp) => {
+    api.channels.history(channel, {
+      count: 1,
+      inclusive: true,
+      latest: timestamp,
+      oldest: timestamp
+    }, (err, response) => {
+      if (response.messages.length < 0) {
+        return null;
+      }
+
+      const replyCount = response.messages[0].reply_count || 0;
+      const reactionCount = response.messages[0].reactions.reduce((prev, current) => prev + current.count, 0) || 0;
+
+      const message = {
+          message: {
+              text: response.messages[0].text,
+              user: response.messages[0].user,
+              timestamp: response.messages[0].ts,
+              channel: channel,
+              nb_responses: replyCount,
+              nb_reactions: reactionCount,
+          },
+          score: calculScore(replyCount, reactionCount)
+      };
+
+      console.log(message);
+    });
+}
 
 rtm
+.on(`${RTM_EVENTS.MESSAGE}::${RTM_MESSAGE_SUBTYPES.MESSAGE_CHANGED}`, (message) => {
+  console.log('changed : ', message);
+})
 .on(`${RTM_EVENTS.MESSAGE}::${RTM_MESSAGE_SUBTYPES.MESSAGE_DELETED}`, (message) => {
   console.log('deleted : ', message);
 })
 .on(`${RTM_EVENTS.MESSAGE}::message_replied`, (message) => {
-  console.log('replied : ', JSON.stringify(message, null, 2));
-});
-
-rtm.on(RTM_EVENTS.REACTION_ADDED, (reaction) => {
-  console.log(reaction);
-  // console.log(`Ohhh :(, une personne vient d'enlever sa reaction :${reaction.reaction}: ...`);
-});
-rtm.on(RTM_EVENTS.REACTION_REMOVED, (reaction) => {
-  console.log(reaction);
-  // console.log(`Ohhh :(, une personne vient d'enlever sa reaction :${reaction.reaction}: ...`);
+  getMessage(message.channel, message.message.ts);
+})
+.on(RTM_EVENTS.REACTION_ADDED, (reaction) => {
+  getMessage(reaction.item.channel, reaction.item.ts);
+})
+.on(RTM_EVENTS.REACTION_REMOVED, (reaction) => {
+  getMessage(reaction.item.channel, reaction.item.ts);
 });
 
 app.listen(port);
->>>>>>> add rtm events
