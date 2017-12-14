@@ -1,5 +1,8 @@
 require('dotenv').config();
 const WebClient = require('@slack/client').WebClient;
+const RtmClient = require('@slack/client').RtmClient;
+const RTM_EVENTS = require('@slack/client').RTM_EVENTS;
+const RTM_MESSAGE_SUBTYPES = require('@slack/client').RTM_MESSAGE_SUBTYPES;
 const util = require('util');
 const fs = require('fs');
 const moment = require('moment');
@@ -112,3 +115,50 @@ app.post('/delete-files', (req, res) => {
 });
 
 app.listen(port);
+
+const rtm = new RtmClient(process.env.SLACK_BOT_TOKEN || '');
+rtm.start();
+
+// {
+//     message: {
+//         text:
+//         user:
+//         timestamp:
+//         channel:
+//         nb_responses:
+//         nb_reactions:
+//     },
+//     score: 40
+// }
+// enlever le plus bas et inserer le nouveau si score > au plus bas
+
+const api = new WebClient(process.env.SLACK_APP_TOKEN);
+
+api.search.messages('Coucou c', 1, (err, messages) => {
+  console.log(messages);
+});
+
+
+rtm.on(`${RTM_EVENTS.MESSAGE}::${RTM_MESSAGE_SUBTYPES.MESSAGE_CHANGED}`, (message) => {
+  console.log('changed : ', message);
+});
+
+rtm
+.on(`${RTM_EVENTS.MESSAGE}::${RTM_MESSAGE_SUBTYPES.MESSAGE_DELETED}`, (message) => {
+  console.log('deleted : ', message);
+})
+.on(`${RTM_EVENTS.MESSAGE}::message_replied`, (message) => {
+  console.log('replied : ', JSON.stringify(message, null, 2));
+});
+
+rtm.on(RTM_EVENTS.REACTION_ADDED, (reaction) => {
+  console.log(reaction);
+  // console.log(`Ohhh :(, une personne vient d'enlever sa reaction :${reaction.reaction}: ...`);
+});
+rtm.on(RTM_EVENTS.REACTION_REMOVED, (reaction) => {
+  console.log(reaction);
+  // console.log(`Ohhh :(, une personne vient d'enlever sa reaction :${reaction.reaction}: ...`);
+});
+
+app.listen(port);
+>>>>>>> add rtm events
