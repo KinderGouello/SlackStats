@@ -19,6 +19,8 @@ const redisClient = redis.createClient({
 const express = require('express');
 const bodyParser = require('body-parser');
 const app = express();
+const TOP_MESSAGES_KEY = 'topMessages';
+const MAX_TOP_MESSAGES = 5;
 
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
@@ -133,57 +135,114 @@ rtm.start();
 const api = new WebClient(process.env.SLACK_APP_TOKEN);
 
 const calculScore = (replyCount, reactionCount, timestamp = 0) => {
-    const REPLY_MULTIPLIER = 0.5;
-    const REACTION_MULTIPLIER = 1;
+  const REPLY_MULTIPLIER = 0.5;
+  const REACTION_MULTIPLIER = 1;
 
-    return replyCount * REPLY_MULTIPLIER + reactionCount * REACTION_MULTIPLIER;
+  return replyCount * REPLY_MULTIPLIER + reactionCount * REACTION_MULTIPLIER;
 }
 
+const getMessageUrl = message => {
+    const timestamp = message.timestamp.replace(/\./, '');
+    return `https://slackstats.slack.com/archives/${message.channel}/p${timestamp}`;
+}
+
+const getMessageId = (channel, timestamp) => `${channel}${timestamp}`;
+
 const getMessage = (channel, timestamp) => {
-    api.channels.history(channel, {
-      count: 1,
-      inclusive: true,
-      latest: timestamp,
-      oldest: timestamp
-    }, (err, response) => {
-      if (response.messages.length < 0) {
-        return null;
-      }
+    return new Promise((resolve, reject) => {
+        api.channels.history(channel, {
+          count: 1,
+          inclusive: true,
+          latest: timestamp,
+          oldest: timestamp
+        }, (err, response) => {
+          if (response.messages.length < 0) {
+            reject();
+          }
 
-      const replyCount = response.messages[0].reply_count || 0;
-      const reactionCount = response.messages[0].reactions.reduce((prev, current) => prev + current.count, 0) || 0;
+          const replyCount = response.messages[0].reply_count || 0;
+          const reactionCount = response.messages[0].reactions.reduce((prev, current) => prev + current.count, 0) || 0;
 
-      const message = {
-          message: {
-              text: response.messages[0].text,
-              user: response.messages[0].user,
-              timestamp: response.messages[0].ts,
-              channel: channel,
-              nb_responses: replyCount,
-              nb_reactions: reactionCount,
-          },
-          score: calculScore(replyCount, reactionCount)
-      };
-
-      console.log(message);
+          resolve({
+            id: getMessageId(channel, response.messages[0].ts),
+            text: response.messages[0].text,
+            user: response.messages[0].user,
+            timestamp: response.messages[0].ts,
+            channel: channel,
+            nb_responses: replyCount,
+            nb_reactions: reactionCount,
+            score: calculScore(replyCount, reactionCount)
+          });
+        })
     });
+}
+
+const getTopMessages = () => {
+    return new Promise((resolve, reject) => {
+        redisClient.get(TOP_MESSAGES_KEY, (err, reply) => {
+            if (err) reject(err);
+
+            resolve(JSON.parse(reply));
+        });
+    });
+}
+
+const setTopMessages = (messages) => {
+    messages.sort((a, b) => {
+        if (a.score < b.score) return -1;
+        if (a.score > b.score) return 1;
+        return 0;
+    });
+
+    redisClient.set(TOP_MESSAGES_KEY, JSON.stringify(messages), (err, reply) => {
+        if (err) throw err;
+        console.log('Top messages set:', messages);
+    });
+};
+
+const treatEvent = async (channel, timestamp) => {
+    const promiseMessage = getMessage(channel, timestamp);
+    const promiseTopMessages = getTopMessages();
+
+    let [message, topMessages] = await Promise.all([promiseMessage, promiseTopMessages]);
+    console.log(message);
+    console.log(topMessages);
+
+    if(!topMessages || !topMessages.length) {
+      setTopMessages([message]);
+    }
+
+    const lowestScore = topMessages[0].score || 0;
+    const oldMessageIndex = topMessages.findIndex(topMessage => topMessage.id === message.id);
+
+    if (oldMessageIndex > -1) {
+      topMessages[oldMessageIndex] = message;
+      setTopMessages(topMessages);
+    } else if (topMessages.length < MAX_TOP_MESSAGES) {
+      topMessages.push(message);
+      setTopMessages(topMessages);
+    } else if (message.score > lowestScore) {
+      topMessages[0] = message;
+      setTopMessages(topMessages);
+    }
 }
 
 rtm
 .on(`${RTM_EVENTS.MESSAGE}::${RTM_MESSAGE_SUBTYPES.MESSAGE_CHANGED}`, (message) => {
-  console.log('changed : ', message);
-})
-.on(`${RTM_EVENTS.MESSAGE}::${RTM_MESSAGE_SUBTYPES.MESSAGE_DELETED}`, (message) => {
-  console.log('deleted : ', message);
+  treatEvent(message.channel, message.message.ts);
 })
 .on(`${RTM_EVENTS.MESSAGE}::message_replied`, (message) => {
-  getMessage(message.channel, message.message.ts);
+  treatEvent(message.channel, message.message.ts);
 })
 .on(RTM_EVENTS.REACTION_ADDED, (reaction) => {
-  getMessage(reaction.item.channel, reaction.item.ts);
+  treatEvent(reaction.item.channel, reaction.item.ts);
 })
 .on(RTM_EVENTS.REACTION_REMOVED, (reaction) => {
-  getMessage(reaction.item.channel, reaction.item.ts);
+  treatEvent(reaction.item.channel, reaction.item.ts);
 });
+
+// redisClient.set(TOP_MESSAGES_KEY, JSON.stringify([]), (err, reply) => {
+//     console.log(reply);
+// });
 
 app.listen(port);
