@@ -116,21 +116,20 @@ app.post('/delete-files', (req, res) => {
   });
 });
 
+app.get('/board', async (req, res) => {
+  const topMessages = await getTopMessages();
+
+  res.send(
+    topMessages
+    .reverse()
+    .reduce((accumulator, topMessage) => {
+        return accumulator += `<li><a href="${getMessageUrl(topMessage)}">${topMessage.text}</a></li>`;
+    }, '<ul>') + '</ul>'
+  );
+});
+
 const rtm = new RtmClient(process.env.SLACK_BOT_TOKEN || '');
 rtm.start();
-
-// {
-//     message: {
-//         text:
-//         user:
-//         timestamp:
-//         channel:
-//         nb_responses:
-//         nb_reactions:
-//     },
-//     score: 40
-// }
-// enlever le plus bas et inserer le nouveau si score > au plus bas
 
 const api = new WebClient(process.env.SLACK_APP_TOKEN);
 
