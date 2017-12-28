@@ -3,10 +3,12 @@ const WebClient = require('@slack/client').WebClient;
 const RtmClient = require('@slack/client').RtmClient;
 const RTM_EVENTS = require('@slack/client').RTM_EVENTS;
 const RTM_MESSAGE_SUBTYPES = require('@slack/client').RTM_MESSAGE_SUBTYPES;
+// const socket = require('socket.io');
+const http = require('http');
 const util = require('util');
 const fs = require('fs');
 const moment = require('moment');
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 9000;
 const token = process.env.SLACK_APP_TOKEN || '';
 const clientId = process.env.SLACK_CLIENT_ID || '';
 const clientSecret = process.env.SLACK_CLIENT_SECRET || '';
@@ -18,12 +20,17 @@ const redisClient = redis.createClient({
 });
 const express = require('express');
 const bodyParser = require('body-parser');
+const path = require('path');
 const app = express();
 const TOP_MESSAGES_KEY = 'topMessages';
 const MAX_TOP_MESSAGES = 5;
 
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
+app.use(express.static(path.resolve(__dirname, 'build')));
+
+const server = require('http').Server(app);
+const io = require('socket.io')(server);
 
 const scope = 'files:read,files:write:user,users.profile:read';
 const state = 'ghjgj657JHK97HI';
@@ -116,16 +123,20 @@ app.post('/delete-files', (req, res) => {
   });
 });
 
-app.get('/board', async (req, res) => {
+app.get('/topMessages', async (req, res) => {
   const topMessages = await getTopMessages();
 
-  res.send(
-    topMessages
-    .reverse()
-    .reduce((accumulator, topMessage) => {
-        return accumulator += `<li><a href="${getMessageUrl(topMessage)}">${topMessage.text}</a></li>`;
-    }, '<ul>') + '</ul>'
-  );
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Content-Type', 'application/json');
+  res.send(JSON.stringify(topMessages.reverse().map(message => {
+    message.link = getMessageUrl(message);
+
+    return message;
+  })));
+});
+
+app.get('/board', async (req, res) => {
+  res.sendFile(path.resolve(__dirname, 'build', 'index.html'));
 });
 
 const rtm = new RtmClient(process.env.SLACK_BOT_TOKEN || '');
@@ -155,12 +166,16 @@ const getMessage = (channel, timestamp) => {
           latest: timestamp,
           oldest: timestamp
         }, (err, response) => {
-          if (response.messages.length < 0) {
+          if (response.messages.length) {
             reject();
           }
 
           const replyCount = response.messages[0].reply_count || 0;
-          const reactionCount = response.messages[0].reactions.reduce((prev, current) => prev + current.count, 0) || 0;
+          let reactionCount = 0;
+
+          if (response.messages[0].reactions) {
+            reactionCount = response.messages[0].reactions.reduce((prev, current) => prev + current.count, 0) || 0;
+          }
 
           resolve({
             id: getMessageId(channel, response.messages[0].ts),
@@ -177,13 +192,13 @@ const getMessage = (channel, timestamp) => {
 }
 
 const getTopMessages = () => {
-    return new Promise((resolve, reject) => {
-        redisClient.get(TOP_MESSAGES_KEY, (err, reply) => {
-            if (err) reject(err);
+  return new Promise((resolve, reject) => {
+    redisClient.get(TOP_MESSAGES_KEY, (err, reply) => {
+      if (err) reject(err);
 
-            resolve(JSON.parse(reply));
-        });
+      resolve(JSON.parse(reply || '[]'));
     });
+  });
 }
 
 const setTopMessages = (messages) => {
@@ -195,6 +210,8 @@ const setTopMessages = (messages) => {
 
     redisClient.set(TOP_MESSAGES_KEY, JSON.stringify(messages), (err, reply) => {
         if (err) throw err;
+
+        io.emit('rankingChanged', messages);
         console.log('Top messages set:', messages);
     });
 };
@@ -244,4 +261,4 @@ rtm
 //     console.log(reply);
 // });
 
-app.listen(port);
+server.listen(port);
