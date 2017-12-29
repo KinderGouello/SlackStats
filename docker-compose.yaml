@@ -12,7 +12,7 @@ services:
     ports:
         - '9000:9000'
     volumes:
-        - ./app:/home/nodejs/app
+        - ./app:/home/node/app
     tty: true
 
   redis:
